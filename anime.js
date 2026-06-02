@@ -241,7 +241,7 @@ function toggleFavorite(anime) {
     favorites.push({
       mal_id: anime.mal_id,
       title: anime.title,
-      image: anime.images?.jpg?.image_url,
+      image: anime.images?.webp?.large_image_url || anime.images?.jpg?.large_image_url,
       score: anime.score,
     });
   }
@@ -254,7 +254,7 @@ function addToRecentlyViewed(anime) {
   recentlyViewed.unshift({
     mal_id: anime.mal_id,
     title: anime.title,
-    image: anime.images?.jpg?.image_url,
+    image: anime.images?.webp?.large_image_url || anime.images?.jpg?.large_image_url,
     score: anime.score,
   });
   recentlyViewed = recentlyViewed.slice(0, 10);
@@ -417,7 +417,7 @@ function renderAnime() {
 
     card.innerHTML = `
       <div class="relative">
-        <img src="${anime.images?.jpg?.image_url || ""}" alt="${anime.title || "Poster"}"
+<img src="${anime.images?.webp?.large_image_url || anime.images?.jpg?.large_image_url || ""}" alt="${anime.title || "Poster"}"
              loading="lazy"
              class="w-full h-60 object-cover rounded mb-3 transition-opacity duration-300"
              onload="this.style.opacity='1'" style="opacity:0">
