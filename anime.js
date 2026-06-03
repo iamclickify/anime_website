@@ -1,4 +1,4 @@
-// === Enhanced anime.js (drop-in) ===
+// === Enhanced anime.js (secure DOM updates, safer URL handling) ===
 const apiUrl = "https://api.jikan.moe/v4/seasons/now";
 const CACHE_KEY = "jikan_season_now_cache_v1";
 const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
@@ -144,17 +144,45 @@ function trapFocus(container) {
   firstEl.focus();
 }
 
+function isValidUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function safeSetHref(el, href) {
+  if (!el) return;
+  if (isValidUrl(href)) {
+    el.href = href;
+    el.target = "_blank";
+    el.rel = "noopener noreferrer";
+  } else {
+    el.href = "#";
+    el.removeAttribute("target");
+    el.removeAttribute("rel");
+  }
+}
+
 function openModal(anime) {
   addToRecentlyViewed(anime);
 
-  document.getElementById("modal-title").textContent = anime.title;
+  document.getElementById("modal-title").textContent = anime.title || "Untitled";
   document.getElementById("modal-title-english").textContent =
     anime.title_english || anime.title_synonyms?.[0] || "";
   document.getElementById("modal-synopsis").textContent =
     anime.synopsis || "No synopsis available.";
-  document.getElementById("modal-image").src =
-    anime.images?.jpg?.large_image_url || anime.images?.jpg?.image_url || "";
-  document.getElementById("modal-image").alt = anime.title || "Anime poster";
+
+  const imgEl = document.getElementById("modal-image");
+  const imageUrl = anime.images?.jpg?.large_image_url || anime.images?.jpg?.image_url || "";
+  if (isValidUrl(imageUrl)) {
+    imgEl.src = imageUrl;
+  } else {
+    imgEl.removeAttribute("src");
+  }
+  imgEl.alt = anime.title || "Anime poster";
 
   document.getElementById("modal-episodes").textContent = anime.episodes || "N/A";
   document.getElementById("modal-score").textContent = anime.score ? `${anime.score}/10` : "N/A";
@@ -166,42 +194,41 @@ function openModal(anime) {
   document.getElementById("modal-aired").textContent = airedText;
 
   const genresContainer = document.getElementById("modal-genres");
-  genresContainer.innerHTML = "";
-  if (anime.genres?.length) {
+  genresContainer.innerHTML = ""; // safe to clear existing
+  if (Array.isArray(anime.genres) && anime.genres.length) {
     anime.genres.forEach((genre) => {
       const genreTag = document.createElement("span");
       genreTag.className = "bg-blue-600 text-white px-3 py-1 rounded-full text-xs";
-      genreTag.textContent = genre.name;
+      genreTag.textContent = genre.name || "Unknown";
       genresContainer.appendChild(genreTag);
     });
   } else {
-    genresContainer.innerHTML = '<span class="text-zinc-400">No genres available</span>';
+    const span = document.createElement("span");
+    span.className = "text-zinc-400";
+    span.textContent = "No genres available";
+    genresContainer.appendChild(span);
   }
 
   const studiosContainer = document.getElementById("modal-studios");
-  studiosContainer.innerHTML = anime.studios?.length
+  studiosContainer.textContent = Array.isArray(anime.studios) && anime.studios.length
     ? anime.studios.map((s) => s.name).join(", ")
-    : '<span class="text-zinc-400">No studio info</span>';
+    : "No studio info";
 
   const producersContainer = document.getElementById("modal-producers");
-  if (anime.producers?.length) {
-    const topProducers = anime.producers.slice(0, 3);
-    producersContainer.innerHTML = topProducers.map((p) => p.name).join(", ");
-  } else {
-    producersContainer.innerHTML = '<span class="text-zinc-400">No producer info</span>';
-  }
+  producersContainer.textContent = Array.isArray(anime.producers) && anime.producers.length
+    ? anime.producers.slice(0, 3).map((p) => p.name).join(", ")
+    : "No producer info";
 
+  // External Links (safe)
   const malLink = document.getElementById("modal-mal-link");
-  if (malLink) malLink.href = anime.url || "#";
+  safeSetHref(malLink, anime.url || "");
 
   const trailerLink = document.getElementById("modal-trailer-link");
-  if (trailerLink) {
-    if (anime.trailer?.url) {
-      trailerLink.href = anime.trailer.url;
-      trailerLink.classList.remove("hidden");
-    } else {
-      trailerLink.classList.add("hidden");
-    }
+  if (anime.trailer?.url && isValidUrl(anime.trailer.url)) {
+    safeSetHref(trailerLink, anime.trailer.url);
+    trailerLink.classList.remove("hidden");
+  } else if (trailerLink) {
+    trailerLink.classList.add("hidden");
   }
 
   // Favorites button
@@ -279,12 +306,25 @@ function renderRecentlyViewed() {
     const card = document.createElement("div");
     card.className =
       "flex-shrink-0 bg-zinc-800 rounded-lg p-2 cursor-pointer hover:bg-zinc-700 transition-colors w-32";
-    card.innerHTML = `
-      <img src="${anime.image || ""}" alt="${anime.title}" loading="lazy"
-           class="w-full h-20 object-cover rounded mb-2">
-      <p class="text-xs text-white font-medium truncate">${anime.title}</p>
-      <p class="text-xs text-zinc-400">${anime.score ? `⭐ ${anime.score}` : "No score"}</p>
-    `;
+
+    const img = document.createElement("img");
+    img.src = anime.image || "";
+    img.alt = anime.title || "Poster";
+    img.loading = "lazy";
+    img.className = "w-full h-20 object-cover rounded mb-2";
+
+    const title = document.createElement("p");
+    title.className = "text-xs text-white font-medium truncate";
+    title.textContent = anime.title;
+
+    const score = document.createElement("p");
+    score.className = "text-xs text-zinc-400";
+    score.textContent = anime.score ? `⭐ ${anime.score}` : "No score";
+
+    card.appendChild(img);
+    card.appendChild(title);
+    card.appendChild(score);
+
     card.addEventListener("click", () => {
       const fullAnime = currentData.find((a) => a.mal_id === anime.mal_id);
       if (fullAnime) openModal(fullAnime);
@@ -331,13 +371,26 @@ async function fetchAnime() {
     renderRecentlyViewed();
   } catch (error) {
     hideLoading();
-    animeCards.innerHTML = `
-      <div class="text-center py-10">
-        <p class="text-red-500 mb-4">⚠️ Failed to load anime data. ${error?.name === "AbortError" ? "Request timed out." : "Please try again."}</p>
-        <button id="retry-fetch" class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">Retry</button>
-      </div>
-    `;
-    document.getElementById("retry-fetch")?.addEventListener("click", fetchAnime);
+    // Build a safe error UI without innerHTML
+    if (animeCards) {
+      animeCards.innerHTML = "";
+      const container = document.createElement("div");
+      container.className = "text-center py-10 text-zinc-300";
+
+      const msg = document.createElement("p");
+      msg.className = "text-red-500 mb-4";
+      msg.textContent = `⚠️ Failed to load anime data. ${error?.name === "AbortError" ? "Request timed out." : "Please try again."}`;
+
+      const retryBtn = document.createElement("button");
+      retryBtn.id = "retry-fetch";
+      retryBtn.className = "px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600";
+      retryBtn.textContent = "Retry";
+      retryBtn.addEventListener("click", fetchAnime);
+
+      container.appendChild(msg);
+      container.appendChild(retryBtn);
+      animeCards.appendChild(container);
+    }
   } finally {
     hideLoading();
   }
@@ -397,6 +450,7 @@ function applyFilters() {
 }
 
 function renderAnime() {
+  if (!animeCards) return;
   animeCards.innerHTML = "";
   const startIndex = (currentPage - 1) * 9;
   const pageData = filteredData.slice(startIndex, startIndex + 9);
@@ -415,20 +469,41 @@ function renderAnime() {
     card.className =
       "bg-zinc-800 p-4 rounded-xl shadow-lg hover:shadow-blue-400 hover:scale-105 transition-all duration-300 cursor-pointer relative";
 
-    card.innerHTML = `
-      <div class="relative">
-<img src="${anime.images?.webp?.large_image_url || anime.images?.jpg?.large_image_url || ""}" alt="${anime.title || "Poster"}"
-             loading="lazy"
-             class="w-full h-60 object-cover rounded mb-3 transition-opacity duration-300"
-             onload="this.style.opacity='1'" style="opacity:0">
-        <div class="absolute top-2 right-2 bg-black bg-opacity-70 text-white px-2 py-1 rounded text-xs">
-          ${anime.score ? `⭐ ${anime.score}` : "No score"}
-        </div>
-      </div>
-      <h3 class="text-lg font-bold text-blue-400 mb-1 line-clamp-2">${anime.title || "Untitled"}</h3>
-      <p class="text-sm text-zinc-400">Episodes: ${anime.episodes ?? "N/A"}</p>
-      <p class="text-sm text-zinc-400">Status: ${anime.status || "N/A"}</p>
-    `;
+    // Image wrapper
+    const imgWrapper = document.createElement("div");
+    imgWrapper.className = "relative";
+
+    const img = document.createElement("img");
+    img.src = anime.images?.webp?.large_image_url || anime.images?.jpg?.large_image_url || "";
+    img.alt = anime.title || "Poster";
+    img.loading = "lazy";
+    img.className = "w-full h-60 object-cover rounded mb-3 transition-opacity duration-300";
+    img.style.opacity = "0";
+    img.addEventListener("load", () => { img.style.opacity = "1"; });
+
+    const scoreBadge = document.createElement("div");
+    scoreBadge.className = "absolute top-2 right-2 bg-black bg-opacity-70 text-white px-2 py-1 rounded text-xs";
+    scoreBadge.textContent = anime.score ? `⭐ ${anime.score}` : "No score";
+
+    imgWrapper.appendChild(img);
+    imgWrapper.appendChild(scoreBadge);
+
+    const titleEl = document.createElement("h3");
+    titleEl.className = "text-lg font-bold text-blue-400 mb-1 line-clamp-2";
+    titleEl.textContent = anime.title || "Untitled";
+
+    const eps = document.createElement("p");
+    eps.className = "text-sm text-zinc-400";
+    eps.textContent = `Episodes: ${anime.episodes ?? "N/A"}`;
+
+    const status = document.createElement("p");
+    status.className = "text-sm text-zinc-400";
+    status.textContent = `Status: ${anime.status || "N/A"}`;
+
+    card.appendChild(imgWrapper);
+    card.appendChild(titleEl);
+    card.appendChild(eps);
+    card.appendChild(status);
 
     card.addEventListener("click", () => openModal(anime));
     animeCards.appendChild(card);
@@ -436,6 +511,7 @@ function renderAnime() {
 }
 
 function renderPagination() {
+  if (!pagination) return;
   pagination.innerHTML = "";
   const totalPages = Math.ceil(filteredData.length / 9);
   if (totalPages <= 1) return;
